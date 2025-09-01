@@ -1,0 +1,29 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+h1, h2, h3, h4, h5 {
+    font-family: 'Poppins', sans-serif;
+}
+.btn-danger {
+    background-color: #d90429;
+    border-color: #d90429;
+    transition: background-color 0.3s ease;
+}
+.btn-danger:hover {
+    background-color: #b60322;
+    border-color: #b60322;
+}
+.card-img-top {
+    object-fit: cover;
+    height: 200px;
+}
+.navbar-brand {
+    font-family: 'Pacifico', cursive;
+    font-size: 1.8rem;
+}
+footer a {
+    color: #d90429;
+}
+footer a:hover {
+    color: #ff3c57;
+}
