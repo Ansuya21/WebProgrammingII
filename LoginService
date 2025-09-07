@@ -1,0 +1,9 @@
+package com.example.service;
+
+import com.example.model.User;
+
+public interface LoginService {
+    boolean authenticate(String username, String password);
+    void register(User user);
+    User getUserByUsername(String username);
+}
