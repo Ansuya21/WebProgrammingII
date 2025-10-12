@@ -1,0 +1,282 @@
+package com.example.happytails.api;
+
+import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
+import io.restassured.response.Response;
+import org.junit.jupiter.api.*;
+
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * JUnit 5 Test Class for Happy Tails Adoption API Authentication and Authorization.
+ * Tests the full lifecycle: Register -> Login -> Access Protected Adoption Resources.
+ * * @author Happy Tails Adoption Team
+ * @version 1.0
+ */
+@DisplayName("Happy Tails Adoption API Security & CRUD Tests")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+public class HappyTailsAuthenticationApiTest {
+
+    // --- Configuration ---
+    // Update BASE_URL to the actual adoption app context path
+    private static final String BASE_URL = "http://localhost:8080/SpringMvcHelloWorld/";
+
+    // Protected resource endpoint for the Adoption Application (CRUD)
+    private static final String PROTECTED_RESOURCE_PATH = "/api/applications";
+
+    private static String jwtToken;
+    private static String testUsername;
+    private static final String TEST_PASSWORD = "AdoptionPassword123!";
+
+    @BeforeAll
+    static void setup() {
+        RestAssured.baseURI = BASE_URL;
+        // Generate a unique email-like username for testing
+        testUsername = "adopter_" + System.currentTimeMillis() + "@test.com";
+        System.out.println("\n*** Running API Tests for Happy Tails Adoption App ***");
+        System.out.println("Base URI set to: " + RestAssured.baseURI);
+    }
+
+    // ---------------------------------------------------------------------------------
+    //                                  AUTHENTICATION TESTS
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * Test 1: User Registration
+     * Tests that a new user (adopter) can successfully register
+     */
+    @Test
+    @Order(1)
+    @DisplayName("Test 1: User Registration - Should Return 201 Created")
+    void testUserRegistration() {
+        System.out.println("\n=== Test 1: Testing Adopter Registration ===");
+
+        // Arrange
+        Map<String, String> registrationData = Map.of(
+                "username", testUsername,
+                "password", TEST_PASSWORD
+        );
+
+        // Act
+        Response response = RestAssured
+                .given()
+                .contentType(ContentType.JSON)
+                .body(registrationData)
+                .when()
+                .post("/api/auth/register")
+                .then()
+                .extract()
+                .response();
+
+        // Assert
+        int statusCode = response.getStatusCode();
+
+        System.out.println("Registration Response Status: " + statusCode);
+
+        // Expect 201 CREATED for a truly new user
+        assertEquals(201, statusCode,
+                "Expected 201 for successful registration, got: " + statusCode + ". Body: " + response.asString());
+
+        System.out.println("✅ Registration successful for user: " + testUsername);
+        System.out.println("=== Test 1: COMPLETED ===\n");
+    }
+
+    /**
+     * Test 2: User Login
+     * Tests that a registered adopter can successfully login and receive a JWT token
+     */
+    @Test
+    @Order(2)
+    @DisplayName("Test 2: User Login - Should Return 200 and JWT Token")
+    void testUserLogin() {
+        System.out.println("\n=== Test 2: Testing Adopter Login ===");
+
+        // Arrange
+        Map<String, String> loginData = Map.of(
+                "username", testUsername,
+                "password", TEST_PASSWORD
+        );
+
+        // Act
+        Response response = RestAssured
+                .given()
+                .contentType(ContentType.JSON)
+                .body(loginData)
+                .when()
+                .post("/api/auth/login")
+                .then()
+                .extract()
+                .response();
+
+        // Assert
+        int statusCode = response.getStatusCode();
+
+        System.out.println("Login Response Status: " + statusCode);
+
+        // Authentication Controller returns 200 OK on success
+        assertEquals(200, statusCode,
+                "Expected 200 for successful login, got: " + statusCode + ". Body: " + response.asString());
+
+        // Crucial: Extract JWT token
+        String token = response.jsonPath().getString("token");
+        assertNotNull(token, "JWT token field 'token' must not be null.");
+        assertFalse(token.isEmpty(), "JWT token must not be empty.");
+
+        jwtToken = token;
+
+        System.out.println("✅ Login successful! JWT token received.");
+        System.out.println("JWT Token extracted: " + token.substring(0, Math.min(40, token.length())) + "...");
+        System.out.println("=== Test 2: COMPLETED ===\n");
+    }
+
+    /**
+     * Test 3: Login with Invalid Credentials
+     * Tests that login fails with incorrect credentials, returning 401 Unauthorized
+     */
+    @Test
+    @Order(3)
+    @DisplayName("Test 3: Login with Invalid Credentials - Should Return 401 Unauthorized")
+    void testLoginWithInvalidCredentials() {
+        System.out.println("\n=== Test 3: Testing Login with Invalid Credentials ===");
+
+        // Arrange
+        Map<String, String> invalidLoginData = Map.of(
+                "username", "nonexistent_adopter@test.com",
+                "password", "wrongpassword"
+        );
+
+        // Act
+        Response response = RestAssured
+                .given()
+                .contentType(ContentType.JSON)
+                .body(invalidLoginData)
+                .when()
+                .post("/api/auth/login")
+                .then()
+                .extract()
+                .response();
+
+        // Assert
+        int statusCode = response.getStatusCode();
+        System.out.println("Invalid Login Response Status: " + statusCode);
+
+        // AuthController returns 401 Unauthorized on failure
+        assertEquals(401, statusCode,
+                "Expected 401 Unauthorized for invalid login, got: " + statusCode);
+
+        System.out.println("✅ Invalid login correctly rejected!");
+        System.out.println("=== Test 3: COMPLETED ===\n");
+    }
+
+    // ---------------------------------------------------------------------------------
+    //                            PROTECTED RESOURCE (CRUD) TESTS
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * Test 4: Access Protected Endpoint Without Token (Negative Security Test)
+     * Tests that the protected /api/applications endpoint rejects requests without a JWT token.
+     */
+    @Test
+    @Order(4)
+    @DisplayName("Test 4: Access Protected Resource Without Token - Should Return 401")
+    void testAccessProtectedEndpointWithoutToken() {
+        System.out.println("\n=== Test 4: Testing Access to Protected Resource (No Token) ===");
+
+        // Arrange: Use relevant adoption application data
+        Map<String, String> applicationData = Map.of(
+                "applicantName", "Unauthorized User",
+                "dogId", "D-001",
+                "livingSituation", "Apartment"
+        );
+
+        // Act: Attempt to POST an application without the Authorization header
+        Response response = RestAssured
+                .given()
+                .contentType(ContentType.JSON)
+                .body(applicationData)
+                .when()
+                .post(PROTECTED_RESOURCE_PATH) // /api/applications
+                .then()
+                .extract()
+                .response();
+
+        // Assert
+        int statusCode = response.getStatusCode();
+        System.out.println("Response Status: " + statusCode);
+
+        // Expected status for missing or invalid token
+        assertTrue(statusCode == 401 || statusCode == 403,
+                "Expected 401/403 when accessing protected endpoint without token, got: " + statusCode);
+
+        System.out.println("✅ Protected endpoint correctly requires authentication!");
+        System.out.println("=== Test 4: COMPLETED ===\n");
+    }
+    /**
+     * Test 5: Access Protected Endpoint With Valid Token (Positive CRUD Test)
+     * Tests that a user can successfully POST a new adoption application.
+     */
+    @Test
+    @Order(5)
+    @DisplayName("Test 5: POST Adoption Application With Token - Should Return 201 Created")
+    void testPostAdoptionApplicationWithToken() {
+        System.out.println("\n=== Test 5: Testing POST Adoption Application With Token ===");
+
+        if (jwtToken == null || jwtToken.isEmpty()) {
+            System.out.println("⚠️  No JWT token available. Skipping this test.");
+            return;
+        }
+
+        // Arrange: Application data for the authorized user
+        Map<String, String> applicationData = Map.of(
+                "applicantName", "Ansu Ghimire",
+                "applicantEmail", testUsername,
+                "dogId", "LUCKY-42", // The dog the user wants to adopt
+                "livingSituation", "House with fenced yard"
+        );
+
+        // Act: POST the application
+        Response response = RestAssured
+                .given()
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer " + jwtToken)
+                .body(applicationData)
+                .when()
+                .post(PROTECTED_RESOURCE_PATH) // /api/applications
+                .then()
+                .extract()
+                .response();
+
+        // Assert
+        int statusCode = response.getStatusCode();
+        System.out.println("Response Status: " + statusCode);
+
+        // Expect 201 CREATED for a successful new resource creation
+        assertEquals(201, statusCode,
+                "Expected 201 CREATED for new application, got: " + statusCode + ". Body: " + response.asString());
+
+        // Store the ID for potential future tests (like GET, PUT, DELETE)
+        // To store the ID for potential cleanup or further tests
+        String createdApplicationId = response.jsonPath().getString("applicationId");
+        assertNotNull(createdApplicationId, "Response must contain the 'applicationId' of the created resource.");
+
+        System.out.println("✅ Successfully created new adoption application (ID: " + createdApplicationId + ")!");
+        System.out.println("=== Test 5: COMPLETED ===\n");
+    }
+
+    // ---------------------------------------------------------------------------------
+    //                                  TEARDOWN
+    // ---------------------------------------------------------------------------------
+
+    @AfterAll
+    static void tearDown() {
+        System.out.println("\n" + "=".repeat(80));
+        System.out.println("HAPPY TAILS ADOPTION API TEST SUITE COMPLETED");
+        System.out.println("=".repeat(80));
+        System.out.println("\nNote: Please ensure the application is running on: " + RestAssured.baseURI);
+        System.out.println("=".repeat(80) + "\n");
+    }
+}
+
+
