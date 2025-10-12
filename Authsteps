@@ -1,0 +1,380 @@
+package com.example.api.steps;
+
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.When;
+import io.cucumber.java.en.Then;
+import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
+import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Cucumber Step Definitions for Authentication and Employee Management (CRUD)
+ */
+public class AuthSteps {
+
+    // --- State Variables ---
+    private RequestSpecification request;
+    private Response response;
+    private String jwtToken;
+    private String currentUsername;
+    private String currentPassword;
+    private Map<String, String> currentPayload;
+    private Long employeeId;
+    private final String AUTH_ENDPOINT = "/api/auth";
+    private final String EMPLOYEE_ENDPOINT = "/api/employees";
+
+    // --- Background/Setup Steps ---
+
+    @Given("the authentication API is available at {string}")
+    public void setApiBaseUrl(String baseUrl) {
+        RestAssured.baseURI = baseUrl;
+        // The RequestSpecification is initialized here and used throughout
+        request = RestAssured.given().contentType(ContentType.JSON);
+    }
+
+    // --- Shared Helper Step Definitions (Authentication Logic) ---
+
+    /**
+     * Helper to register a user via the API for testing subsequent steps.
+     */
+    private void registerUserViaApi(String username, String password) {
+        Map<String, String> regPayload = Map.of("username", username, "password", password);
+        RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(regPayload)
+                .when()
+                .post(AUTH_ENDPOINT + "/register");
+    }
+
+    /**
+     * Helper to log in a user and store the token.
+     */
+    private String loginUserAndGetToken(String username) {
+        Map<String, String> loginPayload = Map.of("username", username, "password", "ProtectedPass123!");
+        Response loginResponse = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(loginPayload)
+                .when()
+                .post(AUTH_ENDPOINT + "/login");
+
+        if (loginResponse.getStatusCode() == 200 || loginResponse.getStatusCode() == 201) {
+            String token = loginResponse.jsonPath().getString("token");
+            assertNotNull(token, "Login failed: JWT token was null in successful response.");
+            return token;
+        } else {
+            fail("Setup failed: Could not log in user " + username + " to get token. Status: " + loginResponse.getStatusCode());
+            return null;
+        }
+    }
+
+    @Given("a user exists with username {string} and password {string}")
+    public void givenAUserExists(String username, String password) {
+        // Register the user first to ensure they exist for the test flow
+        registerUserViaApi(username, password);
+        currentUsername = username;
+        currentPassword = password;
+    }
+
+    @Given("I have a valid JWT token for user {string}")
+    public void iHaveAValidJwtTokenForUser(String username) {
+        // Assume the user exists (or was created in the previous step)
+        // Use a default password since Gherkin doesn't specify it here
+        // NOTE: In a real system, you'd likely retrieve the stored password or use a known test password.
+        jwtToken = loginUserAndGetToken(username);
+        request = RestAssured.given().header("Authorization", "Bearer " + jwtToken).contentType(ContentType.JSON);
+    }
+
+
+    // --- Authentication Scenario Step Definitions ---
+
+    @When("I register a new user with the following credentials:")
+    public void whenIRegisterANewUserWithTheFollowingCredentials(Map<String, String> credentials) {
+        currentUsername = credentials.get("username");
+        currentPassword = credentials.get("password");
+
+        response = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(credentials)
+                .when()
+                .post(AUTH_ENDPOINT + "/register");
+    }
+
+    @Then("the registration response status code should be {int}")
+    public void verifyRegistrationStatusCode(int expectedStatusCode) {
+        assertEquals(expectedStatusCode, response.getStatusCode(), "Registration status code mismatch. Response: " + response.asString());
+    }
+
+    @Then("the registration response should indicate success")
+    public void verifyRegistrationResponseSuccess() {
+        // For registration, we primarily check status code (200 or 201)
+        int actualCode = response.getStatusCode();
+        assertTrue(actualCode == 200 || actualCode == 201, "Registration failed. Status: " + actualCode);
+    }
+
+    @Then("the registration response should contain message {string}")
+    public void verifyResponseMessage(String expectedMessage) {
+        String actualBody = response.asString();
+        assertTrue(actualBody.contains(expectedMessage), "Response body does not contain expected message: " + expectedMessage + ". Actual: " + actualBody);
+    }
+
+    @When("I login with username {string} and password {string}")
+    public void whenILoginWithUsernameAndPassword(String username, String password) {
+        currentUsername = username;
+        currentPassword = password;
+
+        Map<String, String> loginPayload = MapOf(username, password);
+        response = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .body(loginPayload)
+                .when()
+                .post(AUTH_ENDPOINT + "/login");
+    }
+
+    @When("I attempt to login with username {string} and password {string}")
+    public void whenIAttemptToLoginWithInvalidCredentials(String username, String password) {
+        // Same action as successful login, but we expect a 401 response
+        whenILoginWithUsernameAndPassword(username, password);
+    }
+
+    @Then("the login response status code should be {int} or {int}")
+    public void verifyLoginStatusCodeOr(int expectedStatusCode1, int expectedStatusCode2) {
+        int actualStatusCode = response.getStatusCode();
+        assertTrue(actualStatusCode == expectedStatusCode1 || actualStatusCode == expectedStatusCode2,
+                "Expected status code " + expectedStatusCode1 + " or " + expectedStatusCode2 + ", but got " + actualStatusCode + ". Response: " + response.asString());
+    }
+
+    @Then("the login response should contain a JWT token")
+    public void verifyLoginResponseContainsJwtToken() {
+        try {
+            jwtToken = response.jsonPath().getString("token");
+            assertNotNull(jwtToken, "Response must contain a 'token' field.");
+            assertFalse(jwtToken.isEmpty(), "The 'token' field must not be empty.");
+            request = RestAssured.given().header("Authorization", "Bearer " + jwtToken).contentType(ContentType.JSON);
+        } catch (Exception e) {
+            fail("Failed to extract token from response: " + response.asString());
+        }
+    }
+
+    @Then("the login response should indicate success")
+    public void verifyLoginResponseSuccess() {
+        // Assuming a successful login response contains a message or similar indicator
+        String message = response.jsonPath().getString("message");
+        assertNotNull(message, "Login response message is null.");
+        // A better check would be verifying the presence of the token, which is done separately
+    }
+
+    @When("I attempt to access protected endpoint {string} without a token")
+    public void whenIAttemptToAccessProtectedEndpointWithoutToken(String endpoint) {
+        jwtToken = null; // Ensure no token is used
+        response = RestAssured.given()
+                .contentType(ContentType.JSON)
+                .when()
+                .get(endpoint);
+    }
+
+    @When("I access protected endpoint {string} with valid token")
+    public void whenIAccessProtectedEndpointWithValidToken(String endpoint) {
+        assertNotNull(jwtToken, "JWT token must be set before accessing protected endpoint.");
+        response = RestAssured.given()
+                .header("Authorization", "Bearer " + jwtToken)
+                .contentType(ContentType.JSON)
+                .when()
+                .get(endpoint);
+    }
+
+    @Then("the protected endpoint response status code should be {int}")
+    public void verifyProtectedEndpointStatusCode(int expectedStatusCode) {
+        assertEquals(expectedStatusCode, response.getStatusCode(), "Protected endpoint status code mismatch. Response: " + response.asString());
+    }
+
+    // Complete Authentication Flow Steps
+
+    @Then("the registration should be successful")
+    public void verifyRegistrationSuccessFlow() {
+        verifyRegistrationResponseSuccess();
+    }
+
+    @Then("the login should be successful")
+    public void verifyLoginSuccessFlow() {
+        verifyLoginResponseSuccess();
+    }
+
+    @Then("I should receive a JWT token")
+    public void storeJwtToken() {
+        verifyLoginResponseContainsJwtToken();
+    }
+
+    @When("I use the JWT token to access protected endpoint {string}")
+    public void whenIUseTheJwtTokenToAccessProtectedEndpoint(String endpoint) {
+        whenIAccessProtectedEndpointWithValidToken(endpoint);
+    }
+
+    @Then("I should be able to access the protected resource")
+    public void verifyProtectedResourceAccess() {
+        assertEquals(200, response.getStatusCode(), "Should be able to access protected resource.");
+    }
+
+    // --- CRUD Scenario Step Definitions ---
+
+    @When("I create a new employee with the following data:")
+    public void whenICreateANewEmployee(Map<String, String> employeeData) {
+        // Ensure the token is set by a previous step
+        assertNotNull(jwtToken, "Token is required for employee creation.");
+
+        response = RestAssured.given()
+                .header("Authorization", "Bearer " + jwtToken)
+                .contentType(ContentType.JSON)
+                .body(employeeData)
+                .when()
+                .post(EMPLOYEE_ENDPOINT);
+    }
+
+    @Then("the creation response status code should be {int}")
+    public void verifyCreationStatusCode(int expectedStatusCode) {
+        assertEquals(expectedStatusCode, response.getStatusCode(), "Employee creation status code mismatch. Response: " + response.asString());
+    }
+
+    @Then("the creation response should indicate success")
+    public void verifyCreationResponseSuccess() {
+        // For creation, a 201 status code usually implies success
+        assertEquals(201, response.getStatusCode(), "Employee creation failed. Status: " + response.getStatusCode());
+    }
+
+    @Then("and the response should contain the employee's ID")
+    public void verifyResponseContainsEmployeeIdAndStore() {
+        try {
+            // Assuming the successful POST returns the created employee object with its ID
+            // We use Long to match typical database ID types
+            employeeId = response.jsonPath().getLong("employeeId");
+            assertNotNull(employeeId, "Employee ID not found in response.");
+            assertTrue(employeeId > 0, "Employee ID should be positive.");
+        } catch (Exception e) {
+            fail("Failed to extract employeeId from response: " + response.asString());
+        }
+    }
+
+    @Given("an employee with ID {long} exists")
+    public void givenAnEmployeeWithIDExists(Long id) {
+        // We set the ID to be used in subsequent steps.
+        employeeId = id;
+    }
+
+    @When("I access protected endpoint {string}{long} with valid token")
+    public void whenIAccessProtectedEmployeeEndpoint(String endpointPrefix, Long id) {
+        assertNotNull(jwtToken, "Token is required for employee read.");
+        response = RestAssured.given()
+                .header("Authorization", "Bearer " + jwtToken)
+                .contentType(ContentType.JSON)
+                .when()
+                .get(endpointPrefix + id);
+    }
+
+    @Then("the retrieval response status code should be {int}")
+    public void verifyRetrievalStatusCode(int expectedStatusCode) {
+        assertEquals(expectedStatusCode, response.getStatusCode(), "Employee retrieval status code mismatch. Response: " + response.asString());
+    }
+
+    @Then("the retrieval response should indicate success")
+    public void verifyRetrievalResponseSuccess() {
+        assertEquals(200, response.getStatusCode(), "Employee retrieval failed. Status: " + response.getStatusCode());
+    }
+
+    @Then("and the response employee name should be {string}")
+    public void verifyResponseEmployeeName(String expectedName) {
+        String actualName = response.jsonPath().getString("name");
+        assertEquals(expectedName, actualName, "Employee name mismatch in retrieval response.");
+    }
+
+    @Given("an employee with ID {long} exists and I have the update payload")
+    public void givenAnEmployeeWithIDExistsAndIHaveTheUpdatePayload(Long id) {
+        employeeId = id;
+    }
+
+    @When("I update employee {long}'s position to {string}")
+    public void whenIUpdateEmployeePosition(Long id, String newPosition) {
+        assertNotNull(jwtToken, "Token is required for employee update.");
+
+        // This payload needs to be complete for the PUT request
+        Map<String, Object> updatePayload = new HashMap<>();
+        updatePayload.put("employeeId", id);
+        updatePayload.put("name", "Ansu Ghimire");
+        updatePayload.put("email", "ansu.ghimire@ht.com");
+        updatePayload.put("contactNumber", "555-123-4567");
+        updatePayload.put("position", newPosition);
+
+        response = RestAssured.given()
+                .header("Authorization", "Bearer " + jwtToken)
+                .contentType(ContentType.JSON)
+                .body(updatePayload)
+                .when()
+                .put(EMPLOYEE_ENDPOINT + "/" + id);
+    }
+
+    @Then("the update response status code should be {int}")
+    public void verifyUpdateStatusCode(int expectedStatusCode) {
+        assertEquals(expectedStatusCode, response.getStatusCode(), "Employee update status code mismatch. Response: " + response.asString());
+    }
+
+    @Then("the update response should indicate success")
+    public void verifyUpdateResponseSuccess() {
+        assertEquals(200, response.getStatusCode(), "Employee update failed. Status: " + response.getStatusCode());
+    }
+
+    @Then("and the updated employee's position should be {string}")
+    public void verifyUpdatedEmployeePosition(String expectedPosition) {
+        String actualPosition = response.jsonPath().getString("position");
+        assertEquals(expectedPosition, actualPosition, "Employee position mismatch after update.");
+    }
+
+    @When("I delete the employee with ID {long}")
+    public void whenIDeleteTheEmployeeWithID(Long id) {
+        assertNotNull(jwtToken, "Token is required for employee deletion.");
+        response = RestAssured.given()
+                .header("Authorization", "Bearer " + jwtToken)
+                .when()
+                .delete(EMPLOYEE_ENDPOINT + "/" + id);
+    }
+
+    @Then("the deletion response status code should be {int}")
+    public void verifyDeletionStatusCode(int expectedStatusCode) {
+        assertEquals(expectedStatusCode, response.getStatusCode(), "Employee deletion status code mismatch. Response: " + response.asString());
+    }
+
+    @Then("the deletion response should indicate success")
+    public void verifyDeletionResponseSuccess() {
+        // 204 No Content is the standard success for DELETE operations
+        assertEquals(204, response.getStatusCode(), "Employee deletion failed. Status: " + response.getStatusCode());
+    }
+
+    @Then("and the employee with ID {long} should no longer exist")
+    public void verifyEmployeeNoLongerExists(Long id) {
+        // Attempt to retrieve the deleted employee
+        Response checkResponse = RestAssured.given()
+                .header("Authorization", "Bearer " + jwtToken)
+                .contentType(ContentType.JSON)
+                .when()
+                .get(EMPLOYEE_ENDPOINT + "/" + id);
+
+        // Expect 404 Not Found from the GET request
+        assertEquals(404, checkResponse.getStatusCode(),
+                "Expected 404 after deletion, but got " + checkResponse.getStatusCode() + ". Employee may still exist.");
+    }
+
+    /**
+     * Helper method to create a Map<String, String> easily.
+     */
+    private Map<String, String> MapOf(String v1, String v2) {
+        Map<String, String> map = new HashMap<>();
+        map.put("username", v1);
+        map.put("password", v2);
+        return map;
+    }
+}
+
+
